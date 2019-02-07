@@ -411,7 +411,7 @@ void LaplaceProblem<dim>::setup_system ()
     std::set<types::boundary_id> dirichlet_boundary;
     std::set<types::boundary_id> no_flux_boundary;
     // Mixed dirichlet and no-flux
-    if (false)
+    if (true)
     {
         dirichlet_boundary.insert(0);
 
