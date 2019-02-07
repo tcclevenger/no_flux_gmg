@@ -1,0 +1,9 @@
+*CMakeFiles/
+*.pvtu
+*.vtu
+*.cbp
+*.cmake
+*CMakeCache.txt
+/unit_box/Makefile
+/unit_box/step-37
+*CMakeLists.txt.user
