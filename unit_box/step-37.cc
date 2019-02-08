@@ -357,9 +357,13 @@ void set_no_flux_mg_constraints (const DoFHandler<dim>    &dof_handler,
                 Tensor<1,dim> normal_vec =
                         face->get_manifold().normal_vector(face,face->center());
 
-                if (std::abs(unit_vec*normal_vec) > 1e-10)
+                if (std::abs(unit_vec*normal_vec - 1.0) < 1e-10)
                     comp_mask.set(d,true);
             }
+
+    Assert(comp_mask.n_selected_components() == 1, ExcMessage("We can currently only support no normal flux conditions "
+                                                            "for a specific boundary id if all faces are a) facing in "
+                                                            "the same direction and b) are normal to the x, y, or z axis."));
 
     mg_constrained_dofs.make_zero_boundary_constraints(dof_handler, bid_set, comp_mask);
 }
