@@ -337,35 +337,46 @@ namespace NoFluxConstraints
 {
 
 template <int dim>
-void set_no_flux_mg_constraints (const DoFHandler<dim>    &dof_handler,
+void make_no_normal_flux_constraints (const DoFHandler<dim>    &dof,
                                  const types::boundary_id  bid,
                                  MGConstrainedDoFs         &mg_constrained_dofs)
 {
+    // For a given boundary id, find which vector component is on the boundary
+    // and set a zero boundary constraint for those degrees of freedom.
     std::set<types::boundary_id> bid_set;
     bid_set.insert(bid);
 
-    ComponentMask comp_mask(dim,false);
-    typename Triangulation<dim>::face_iterator face = dof_handler.get_triangulation().begin_face(),
-            endf = dof_handler.get_triangulation().end_face();
-    for (; face!=endf; ++face)
-        if (face->boundary_id()==bid)
-            for (unsigned int d=0; d<dim; ++d)
-            {
-                Tensor<1,dim,double> unit_vec;
-                unit_vec[d] = 1.0;
+    ComponentMask comp_mask(dim, false);
+    typename Triangulation<dim>::face_iterator
+      face = dof.get_triangulation().begin_face(),
+      endf = dof.get_triangulation().end_face();
+    for (; face != endf; ++face)
+      if (face->boundary_id() == bid)
+        for (unsigned int d = 0; d < dim; ++d)
+          {
+            Tensor<1, dim, double> unit_vec;
+            unit_vec[d] = 1.0;
 
-                Tensor<1,dim> normal_vec =
-                        face->get_manifold().normal_vector(face,face->center());
+            Tensor<1, dim> normal_vec =
+              face->get_manifold().normal_vector(face, face->center());
 
-                if (std::abs(unit_vec*normal_vec - 1.0) < 1e-10)
-                    comp_mask.set(d,true);
-            }
+            if (std::abs(std::abs(unit_vec * normal_vec) - 1.0) < 1e-10)
+              comp_mask.set(d, true);
+            else
+              Assert(std::abs(unit_vec * normal_vec) < 1e-10,
+                     ExcMessage("Sorry, only aligned faces are supported!"));
+          }
 
-    Assert(comp_mask.n_selected_components() == 1, ExcMessage("We can currently only support no normal flux conditions "
-                                                            "for a specific boundary id if all faces are a) facing in "
-                                                            "the same direction and b) are normal to the x, y, or z axis."));
+    Assert(comp_mask.n_selected_components() == 1,
+           ExcMessage(
+             "We can currently only support no normal flux conditions "
+             "for a specific boundary id if all faces are a) facing in "
+             "the same direction and b) are normal to the x, y, or z axis. "
+             "This can be fixed by setting colorize=true during mesh "
+             "generation and calling make_no_normal_flux_constraints() "
+             "for each boundary id associated with no normal flux conditions."));
 
-    mg_constrained_dofs.make_zero_boundary_constraints(dof_handler, bid_set, comp_mask);
+    mg_constrained_dofs.make_zero_boundary_constraints(dof, bid_set, comp_mask);
 }
 
 }
@@ -482,8 +493,10 @@ void LaplaceProblem<dim>::setup_system ()
 
     mg_constrained_dofs.initialize(dof_handler);
     for (auto& bid : no_flux_boundary)
-        NoFluxConstraints::set_no_flux_mg_constraints(dof_handler,bid,mg_constrained_dofs);
-    //mg_constrained_dofs.make_no_flux_constraints_for_box(dof_handler,bid);
+    {
+        mg_constrained_dofs.make_no_normal_flux_constraints(dof_handler,bid);
+        //NoFluxConstraints::set_no_flux_mg_constraints(dof_handler,bid,mg_constrained_dofs);
+    }
 
     for (unsigned int level=0; level<nlevels; ++level)
     {
