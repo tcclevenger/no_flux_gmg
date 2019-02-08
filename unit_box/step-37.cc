@@ -33,6 +33,8 @@
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/fe/fe_system.h>
 
+#include <deal.II/lac/affine_constraints.h>
+
 #include <deal.II/grid/tria.h>
 #include <deal.II/grid/tria_accessor.h>
 #include <deal.II/grid/tria_iterator.h>
@@ -331,7 +333,38 @@ LaplaceOperator<dim,fe_degree,number>
     }
 }
 
+namespace NoFluxConstraints
+{
 
+template <int dim>
+void set_no_flux_mg_constraints (const DoFHandler<dim>    &dof_handler,
+                                 const types::boundary_id  bid,
+                                 MGConstrainedDoFs         &mg_constrained_dofs)
+{
+    std::set<types::boundary_id> bid_set;
+    bid_set.insert(bid);
+
+    ComponentMask comp_mask(dim,false);
+    typename Triangulation<dim>::face_iterator face = dof_handler.get_triangulation().begin_face(),
+            endf = dof_handler.get_triangulation().end_face();
+    for (; face!=endf; ++face)
+        if (face->boundary_id()==bid)
+            for (unsigned int d=0; d<dim; ++d)
+            {
+                Tensor<1,dim,double> unit_vec;
+                unit_vec[d] = 1.0;
+
+                Tensor<1,dim> normal_vec =
+                        face->get_manifold().normal_vector(face,face->center());
+
+                if (std::abs(unit_vec*normal_vec) > 1e-10)
+                    comp_mask.set(d,true);
+            }
+
+    mg_constrained_dofs.make_zero_boundary_constraints(dof_handler, bid_set, comp_mask);
+}
+
+}
 
 
 template <int dim>
@@ -352,7 +385,7 @@ private:
     FESystem<dim>                                  fe;
     DoFHandler<dim>                            dof_handler;
 
-    ConstraintMatrix                           constraints;
+    AffineConstraints<double>                           constraints;
     typedef LaplaceOperator<dim,degree_finite_element,double> SystemMatrixType;
     SystemMatrixType                           system_matrix;
 
@@ -408,52 +441,19 @@ void LaplaceProblem<dim>::setup_system ()
     DoFTools::make_hanging_node_constraints(dof_handler,
                                             constraints);
 
-    std::set<types::boundary_id> dirichlet_boundary;
     std::set<types::boundary_id> no_flux_boundary;
-    // Mixed dirichlet and no-flux
-    if (true)
-    {
-        dirichlet_boundary.insert(0);
+    no_flux_boundary.insert(0);
+    no_flux_boundary.insert(1);
+    no_flux_boundary.insert(2);
+    no_flux_boundary.insert(3);
 
-        VectorTools::interpolate_boundary_values (dof_handler,
-                                                  0,
-                                                  Functions::ZeroFunction<dim>(dim),
-                                                  constraints);
+    VectorTools::compute_no_normal_flux_constraints(dof_handler,
+                                                    0,
+                                                    no_flux_boundary,
+                                                    constraints);
 
-        no_flux_boundary.insert(1);
-        no_flux_boundary.insert(2);
-        no_flux_boundary.insert(3);
-        VectorTools::compute_no_normal_flux_constraints(dof_handler,
-                                                        0,
-                                                        no_flux_boundary,
-                                                        constraints);
-    }
-    // All no-flux
-    else if (false)
-    {
-        no_flux_boundary.insert(0);
-        no_flux_boundary.insert(1);
-        no_flux_boundary.insert(2);
-        no_flux_boundary.insert(3);
-        VectorTools::compute_no_normal_flux_constraints(dof_handler,
-                                                        0,
-                                                        no_flux_boundary,
-                                                        constraints);
-    }
-    // All Dirichlet
-    else
-    {
-        dirichlet_boundary.insert(0);
-        dirichlet_boundary.insert(1);
-        dirichlet_boundary.insert(2);
-        dirichlet_boundary.insert(3);
-        for (unsigned int i=0; i<2*dim; ++i)
-            VectorTools::interpolate_boundary_values (dof_handler,
-                                                      i,
-                                                      Functions::ZeroFunction<dim>(dim),
-                                                      constraints);
-    }
     constraints.close();
+
 
     {
         typename MatrixFree<dim,double>::AdditionalData additional_data;
@@ -477,15 +477,16 @@ void LaplaceProblem<dim>::setup_system ()
     mg_matrices.resize(0, nlevels-1);
 
     mg_constrained_dofs.initialize(dof_handler);
-    if (dirichlet_boundary.size() > 0)
-        mg_constrained_dofs.make_zero_boundary_constraints(dof_handler, dirichlet_boundary);
+    for (auto& bid : no_flux_boundary)
+        NoFluxConstraints::set_no_flux_mg_constraints(dof_handler,bid,mg_constrained_dofs);
+    //mg_constrained_dofs.make_no_flux_constraints_for_box(dof_handler,bid);
 
     for (unsigned int level=0; level<nlevels; ++level)
     {
         IndexSet relevant_dofs;
         DoFTools::extract_locally_relevant_level_dofs(dof_handler, level,
                                                       relevant_dofs);
-        ConstraintMatrix level_constraints;
+        AffineConstraints<double> level_constraints;
         level_constraints.reinit(relevant_dofs);
         level_constraints.add_lines(mg_constrained_dofs.get_boundary_indices(level));
         level_constraints.close();
